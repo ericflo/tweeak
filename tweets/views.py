@@ -25,8 +25,7 @@ def timeline(request):
         tweets,next = riakapi.get_timeline(request.session['username'],
             start=start, limit=NUM_PER_PAGE)
     else:
-        tweets,next = riakapi.get_userline(riakapi.PUBLIC_USERLINE_KEY,
-            start=start, limit=NUM_PER_PAGE)
+        tweets,next = riakapi.get_publicline(start=start, limit=NUM_PER_PAGE)
     context = {
         'form': form,
         'tweets': tweets,
@@ -37,8 +36,7 @@ def timeline(request):
 
 def publicline(request):
     start = request.GET.get('start')
-    tweets,next = riakapi.get_userline(riakapi.PUBLIC_USERLINE_KEY,
-        start=start, limit=NUM_PER_PAGE)
+    tweets,next = riakapi.get_publicline(start=start, limit=NUM_PER_PAGE)
     context = {
         'tweets': tweets,
         'next': next,
