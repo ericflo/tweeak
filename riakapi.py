@@ -95,6 +95,10 @@ def _get_start(start):
         return str(start).zfill(20)
     return '9' * 20
 
+### TODO: Determine whether map/reduce is appropriate for this situation, or
+###       whether we want to create an inverted index somehow (buckets,
+###       partitioned objects, or something else entirely.)
+
 def get_timeline(username, start=None, limit=40):
     """
     Given a username, get their tweet timeline (tweets from people they follow).
