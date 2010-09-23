@@ -11,6 +11,14 @@ __all__ = ['get_user_by_username', 'get_friend_usernames', 'get_publicline',
 CLIENT = RiakClient(host='127.0.0.1', port='8098',
     transport_class=RiakHttpTransport)
 
+REVERSE_SORT = """
+function(value, arg) {
+    var sorter = function(f, s) { 
+        return (f.ts === s.ts ? 0 : (f.ts < s.ts ? 1 : -1));
+    };
+    return value.sort(sorter).slice(0, %s);
+}
+"""
 
 class DatabaseError(Exception):
     """
@@ -72,37 +80,38 @@ def get_followers(username):
     return map(get_user_by_username, get_follower_usernames(username))
 
 def _result_next(result, limit):
-    if len(result) == limit:
-        next = result[-1]['_ts']
+    if len(result) == limit + 1:
+        next = result[-1]['ts']
         result = result[:-1]
     else:
         next = None
-    return result, None
+    return result, next
+
+def _get_start(start):
+    if start:
+        return str(start).zfill(20)
+    return '9' * 20
 
 def get_timeline(username, start=None, limit=40):
     """
     Given a username, get their tweet timeline (tweets from people they follow).
     """
-    usernames = ', '.join(["'%s'" % u for u in get_friend_usernames(username)])
+    usernames = get_friend_usernames(username) + [username]
+    usernames = ', '.join(["'%s': 1" % u for u in usernames])
     map_func = """
 function(value, keyData, arg) {
-    var usernames = [%s];
+    var usernames = {%s};
     var data = Riak.mapValuesJson(value)[0];
-    if(data._ts > %s && usernames.indexOf(data.username) != -1) {
+    if(data.ts <= '%s' && usernames[data.username]) {
+        data.id = value.key;
         return [data];
     }
     return [];
 }
-    """ % (start or 0, usernames)
-    reduce_func = """
-function(value, arg) {
-    var reverseSort = function(first, second) {
-        return second - first;
-    };
-    return value.sort(reverseSort).slice(0, %s);
-}
-    """ % (limit,)
-    result = CLIENT.add('tweets').map(map_func).reduce(reduce_func).run()
+    """ % (usernames, _get_start(start))
+    reduce_func = REVERSE_SORT % (limit + 1,)
+    result = CLIENT.add('tweets').map(str(map_func))
+    result = result.reduce(str(reduce_func)).run()
     return _result_next(result, limit)
 
 def get_userline(username, start=None, limit=40):
@@ -112,45 +121,42 @@ def get_userline(username, start=None, limit=40):
     map_func = """
 function(value, keyData, arg) {
     var data = Riak.mapValuesJson(value)[0];
-    if(data._ts > %s && data.username === '%s') {
+    if(data.ts <= '%s' && data.username === '%s') {
+        data.id = value.key;
         return [data];
     }
     return [];
 }
-    """ % (start or 0, username)
-    reduce_func = """
-function(value, arg) {
-    var reverseSort = function(first, second) {
-        return second - first;
-    };
-    return value.sort(reverseSort).slice(0, %s);
-}
-    """ % (limit,)
-    result = CLIENT.add('tweets').map(map_func).reduce(reduce_func).run()
-    print result
+    """ % (_get_start(start), username)
+    reduce_func = REVERSE_SORT % (limit + 1,)
+    result = CLIENT.add('tweets').map(str(map_func))
+    result = result.reduce(str(reduce_func)).run()
     return _result_next(result, limit)
 
 def get_publicline(start=None, limit=40):
-    reduce_func = """
-function(value, arg) {
-    var reverseSort = function(first, second) {
-        return second - first;
-    };
-    return value.sort(reverseSort).slice(0, %s);
+    map_func = """
+function(value, keyData, arg) {
+    var data = Riak.mapValuesJson(value)[0];
+    if(data.ts <= '%s') {
+        data.id = value.key;
+        return [data];
+    }
+    return [];
 }
-    """ % (limit,)
-    result = CLIENT.add('tweets').map('Riak.mapValuesJson')
-    result = result.reduce(reduce_func).run()
-    print result
+    """ % (_get_start(start),)
+    reduce_func = REVERSE_SORT % (limit + 1,)
+    result = CLIENT.add('tweets').map(str(map_func))
+    result = result.reduce(str(reduce_func)).run()
     return _result_next(result, limit)
 
-def get_tweet(tweet_id):
+def get_tweet(tweetid):
     """
     Given a tweet id, this gets the entire tweet record.
     """
-    resp = CLIENT.bucket('tweets').get(tweet_id).get_data()
+    resp = CLIENT.bucket('tweets').get(tweetid).get_data()
     if not resp:
-        raise NotFound(tweet_id)
+        raise NotFound(tweetid)
+    resp['id'] = tweetid
     return resp
 
 
@@ -162,12 +168,12 @@ def save_user(username, user):
     """
     CLIENT.bucket('users').new(str(username), user).store()
 
-def save_tweet(tweet_id, username, tweet_data):
+def save_tweet(tweetid, username, tweet_data):
     """
     Saves the tweet record.
     """
-    tweet_data['_ts'] = long(time.time() * 1e6)
-    CLIENT.bucket('tweets').new(str(tweet_id), tweet_data).store()
+    tweet_data['ts'] = str(long(time.time() * 1e6)).zfill(20)
+    CLIENT.bucket('tweets').new(str(tweetid), tweet_data).store()
 
 def add_friends(from_username, to_usernames):
     """

@@ -9,7 +9,7 @@ from tweets.forms import TweetForm
 
 import riakapi
 
-NUM_PER_PAGE = 40
+NUM_PER_PAGE = 20
 
 def timeline(request):
     form = TweetForm(request.POST or None)
