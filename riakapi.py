@@ -80,6 +80,9 @@ def get_followers(username):
     return map(get_user_by_username, get_follower_usernames(username))
 
 def _result_next(result, limit):
+    # Hack to detect swallowed errors:
+    if 'lineno' in result and 'message' in result and 'source' in result:
+        return [], None
     if len(result) == limit + 1:
         next = result[-1]['ts']
         result = result[:-1]
@@ -181,16 +184,20 @@ def add_friends(from_username, to_usernames):
     """
     following = CLIENT.bucket('following').get(from_username)
     follow_data = following.get_data() or {'usernames': []}
-    follow_data['usernames'].extend(to_usernames)
+    follow_data['usernames'] = list(set(
+        follow_data['usernames'] + to_usernames))
     following.set_data(follow_data)
+    following.set_content_type('application/json')
     following.store()
     
-    followers_bucket = CLIENT.get('followers')
+    followers_bucket = CLIENT.bucket('followers')
     for username in to_usernames:
         followers = followers_bucket.get(username)
         follower_data = followers.get_data() or {'usernames': []}
-        follower_data['usernames'].append(from_username)
+        if from_username not in follower_data['usernames']:
+            follower_data['usernames'].append(from_username)
         followers.set_data(follower_data)
+        followers.set_content_type('application/json')
         followers.store()
 
 def remove_friends(from_username, to_usernames):
@@ -202,12 +209,17 @@ def remove_friends(from_username, to_usernames):
     for username in to_usernames:
         follow_data['usernames'].remove(username)
     following.set_data(follow_data)
+    following.set_content_type('application/json')
     following.store()
     
-    followers_bucket = CLIENT.get('followers')
+    followers_bucket = CLIENT.bucket('followers')
     for username in to_usernames:
         followers = followers_bucket.get(username)
         follower_data = followers.get_data() or {'usernames': []}
-        follower_data['usernames'].remove(from_username)
+        try:
+            follower_data['usernames'].remove(from_username)
+        except ValueError:
+            continue
         followers.set_data(follower_data)
+        followers.set_content_type('application/json')
         followers.store()
